@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/hpcloud/tail"
+	"log"
+	"os"
+	"time"
 )
 
 type match struct {
@@ -13,14 +14,18 @@ type match struct {
 }
 
 type timer struct {
-	startedAt int64
+	startedAt time.Time
 	duration  int64
 	text      string
 	onEnd     func()
 }
 
 type appState struct {
-	timers []timer
+	spellTriggers []spellTrigger
+	timers        []timer
+	spellBook     spellBook
+	ui            screenOpts
+	casting       *spell
 }
 
 type screenOpts struct {
@@ -32,36 +37,75 @@ type screenOpts struct {
 var haddyLogFile = "/home/mtkoan/Games/everquest/drive_c/eq/Logs/eqlog_Haddy_project1999.txt"
 var hadgarLogFile = "/home/mtkoan/Games/everquest/drive_c/eq/Logs/eqlog_Hadgar_P1999Green.txt"
 
-func tailLog(s tcell.Screen, f string) error {
-	t, err := tail.TailFile(f, tail.Config{Follow: true, Location: &tail.SeekInfo{Offset: 0, Whence: 2}})
+func (state *appState) tailLog(f string) error {
+	seekInfo := &tail.SeekInfo{Offset: 0, Whence: 2}
+
+	simLog := os.Getenv("SIM_LOG")
+	if simLog != "" {
+		f = simLog
+		seekInfo = &tail.SeekInfo{Offset: 0, Whence: 0}
+	}
+
+	t, err := tail.TailFile(f, tail.Config{Follow: true, Location: seekInfo})
 	if err != nil {
 		log.Fatalf("%+v", err)
 		return err
 	}
 	for line := range t.Lines {
-		m := match{line: line.Text}
-		err := s.PostEvent(tcell.NewEventInterrupt(m))
-		if err != nil {
-			return err
-		}
+		state.handeLine(line)
 	}
 	return nil
 }
 
+func (state *appState) handeLine(line *tail.Line) {
+	txt := line.Text[27:]
+	for _, t := range state.spellTriggers {
+		m := t.re.FindStringSubmatch(txt)
+		if len(m) > 0 {
+			res := t.actor(state, m)
+			if res {
+				break
+			}
+		}
+	}
+}
+
+func (state *appState) draw() {
+	y := 0
+	for _, t := range state.timers {
+		state.ui.drawLine(tcell.StyleDefault, t.text, y)
+		y++
+	}
+	rem := state.ui.height - y
+	if rem > 0 {
+		for i := 0; i < rem; i++ {
+			state.ui.drawLine(tcell.StyleDefault, "", y+i)
+		}
+	}
+}
+
+func (state *appState) updateTimers() {
+
+}
+
 // drawLine draws a line of text on the screen but truncates it if it's too long.
-func (so screenOpts) drawLine(style tcell.Style, text string) {
+func (so screenOpts) drawLine(style tcell.Style, text string, row int) {
 	x := 0
+	if row > so.height {
+		return
+	}
+
 	for _, r := range []rune(text) {
 		if x >= so.width {
 			break
 		}
-		so.screen.SetContent(x, 0, r, nil, style)
+		so.screen.SetContent(x, row, r, nil, style)
 		x++
 	}
 	remainder := so.width - x
 	if remainder > 0 {
 		for i := 0; i < remainder; i++ {
-			so.screen.SetContent(x+i, 0, ' ', nil, style)
+			so.screen.SetContent(x+i, row, ' ', nil, style)
 		}
 	}
 }
@@ -118,11 +162,13 @@ func drawBox(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string)
 	drawText(s, x1+1, y1+1, x2-1, y2-1, style, text)
 }
 
+type uiTick struct{}
+
 func main() {
 	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
 	boxStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorPurple)
 
-	// Initialize screen
+	// Initialize ui
 	s, err := tcell.NewScreen()
 	if err != nil {
 		log.Fatalf("%+v", err)
@@ -151,7 +197,7 @@ func main() {
 	}
 	defer quit()
 
-	// Here's how to get the screen size when you need it.
+	// Here's how to get the ui size when you need it.
 	// xmax, ymax := s.Size()
 
 	// Here's an example of how to inject a keystroke where it will
@@ -160,17 +206,36 @@ func main() {
 	// return an error.
 	// s.PostEvent(tcell.NewEventKey(tcell.KeyRune, rune('a'), 0))
 
+	sb := newSpellBook()
+	state := &appState{
+		spellBook:     sb,
+		ui:            screenOpts{screen: s, width: 120, height: 24},
+		timers:        []timer{},
+		spellTriggers: sb.makeSpellTriggers(),
+	}
+
 	go func() {
-		err := tailLog(s, hadgarLogFile)
+		err := state.tailLog(hadgarLogFile)
 		if err != nil {
 			log.Fatalf("%+v", err)
+		}
+	}()
+
+	go func() {
+		for {
+			state.updateTimers()
+			time.Sleep(time.Millisecond * 100)
+			err := s.PostEvent(tcell.NewEventInterrupt(uiTick{}))
+			if err != nil {
+				log.Fatalf("%+v", err)
+			}
 		}
 	}()
 
 	// Event loop
 	ox, oy := -1, -1
 	for {
-		// Update screen
+		// Update ui
 		s.Show()
 
 		// Poll event
@@ -179,10 +244,9 @@ func main() {
 		// Process event
 		switch ev := ev.(type) {
 		case *tcell.EventInterrupt:
-			switch e := ev.Data().(type) {
-			case match:
-				drawText(s, 1, 1, 110, 7, boxStyle, e.line)
-				break
+			switch ev.Data().(type) {
+			case uiTick:
+				state.draw()
 			}
 		case *tcell.EventResize:
 			s.Sync()
