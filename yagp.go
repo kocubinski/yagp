@@ -9,15 +9,16 @@ import (
 	"time"
 )
 
-type match struct {
-	line string
-}
-
 type timer struct {
 	startedAt time.Time
-	duration  int64
+	duration  time.Duration
 	text      string
 	onEnd     func()
+}
+
+func (t timer) render() string {
+	remaining := t.duration - time.Since(t.startedAt)
+	return fmt.Sprintf("%s - %s", t.text, remaining.Round(time.Second))
 }
 
 type appState struct {
@@ -73,7 +74,7 @@ func (state *appState) handeLine(line *tail.Line) {
 func (state *appState) draw() {
 	y := 0
 	for _, t := range state.timers {
-		state.ui.drawLine(tcell.StyleDefault, t.text, y)
+		state.ui.drawLine(tcell.StyleDefault, t.render(), y)
 		y++
 	}
 	rem := state.ui.height - y
@@ -85,7 +86,6 @@ func (state *appState) draw() {
 }
 
 func (state *appState) updateTimers() {
-
 }
 
 // drawLine draws a line of text on the screen but truncates it if it's too long.

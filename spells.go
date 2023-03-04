@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var CharacterLevel = float64(24)
+var CharacterLevel = float64(45)
 
 type spellActor func(*appState, []string) bool
 
@@ -129,7 +129,7 @@ func newSpellBook() spellBook {
 	return book
 }
 
-func spellDuration(spell spell, level float64) int64 {
+func spellDuration(spell spell, level float64) time.Duration {
 	ticks := float64(0)
 	duration := float64(spell.duration)
 
@@ -138,13 +138,13 @@ func spellDuration(spell spell, level float64) int64 {
 		ticks = 0
 	case 1:
 		ticks = math.Ceil(level / 2)
-		math.Min(ticks, duration)
+		ticks = math.Min(ticks, duration)
 	case 2:
 		ticks = math.Ceil(level / 5 * 3)
-		math.Min(ticks, duration)
+		ticks = math.Min(ticks, duration)
 	case 3:
 		ticks = level * 30
-		math.Min(ticks, duration)
+		ticks = math.Min(ticks, duration)
 	case 4:
 		if duration == 0 {
 			ticks = 50
@@ -183,7 +183,7 @@ func spellDuration(spell spell, level float64) int64 {
 		}
 	}
 
-	return spell.duration
+	return time.Duration(int64(ticks) * int64(time.Second) * 6)
 }
 
 //def create_spell_book():
