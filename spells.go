@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var CharacterLevel = float64(45)
+var CharacterLevel = float64(60)
 
 type spellActor func(*appState, []string) bool
 
@@ -27,6 +27,13 @@ func newTrigger(re string, actor spellActor) spellTrigger {
 	}
 }
 
+func isJunkTrigger(s string) bool {
+	if strings.TrimSpace(s) == "" || s == "." {
+		return true
+	}
+	return false
+}
+
 func (sb spellBook) makeSpellTriggers() []spellTrigger {
 	triggers := []spellTrigger{
 		newTrigger(`You begin casting (.*)\.$`, func(s *appState, m []string) bool {
@@ -38,10 +45,9 @@ func (sb spellBook) makeSpellTriggers() []spellTrigger {
 			return false
 		}),
 	}
-	for k, s := range sb.byOtherEffect {
-		if k == "" {
-			continue
-		}
+
+	// others
+	for _, s := range sb.byOtherEffect {
 		t := newTrigger(fmt.Sprintf(`(.*)(%s)$`, s.effectOther),
 			func(s *appState, m []string) bool {
 				target := m[1]
@@ -50,16 +56,54 @@ func (sb spellBook) makeSpellTriggers() []spellTrigger {
 					return false
 				}
 
-				if s.casting != nil && s.casting.id == sp.id {
+				theSpell := *s.casting
+				// e.g. Lull, Soothe, Calm, etc. have identical effectOther
+				if s.casting != nil && theSpell.effectOther == sp.effectOther {
 					s.casting = nil
 				} else {
 					return false
 				}
 
+				if sp.duration == 0 {
+					return true
+				}
+
 				s.timers = append(s.timers, timer{
 					startedAt: time.Now(),
-					duration:  spellDuration(sp, CharacterLevel),
-					text:      fmt.Sprintf("%s - %s", sp.name, target),
+					duration:  spellDuration(theSpell, CharacterLevel),
+					text:      fmt.Sprintf("%s; %s", target, theSpell.name),
+				})
+
+				return true
+			})
+		triggers = append(triggers, t)
+	}
+
+	// self
+	for _, s := range sb.bySelfEffect {
+		t := newTrigger(fmt.Sprintf(`(%s)$`, s.effectYou),
+			func(s *appState, m []string) bool {
+				sp, ok := s.spellBook.bySelfEffect[m[1]]
+				if !ok {
+					return false
+				}
+
+				theSpell := *s.casting
+				// for example, Yaulp I-IV have identical effectYou
+				if s.casting != nil && theSpell.effectYou == sp.effectYou {
+					s.casting = nil
+				} else {
+					return false
+				}
+
+				if sp.duration == 0 {
+					return true
+				}
+
+				s.timers = append(s.timers, timer{
+					startedAt: time.Now(),
+					duration:  spellDuration(theSpell, CharacterLevel),
+					text:      fmt.Sprintf("%s", theSpell.name),
 				})
 
 				return true
@@ -121,9 +165,15 @@ func newSpellBook() spellBook {
 			formula:       formula,
 		}
 		book.byName[s.name] = s
-		book.bySelfEffect[s.effectYou] = s
-		book.byOtherEffect[s.effectOther] = s
-		book.byWornOff[s.effectWornOff] = s
+		if !isJunkTrigger(s.effectYou) {
+			book.bySelfEffect[s.effectYou] = s
+		}
+		if !isJunkTrigger(s.effectOther) {
+			book.byOtherEffect[s.effectOther] = s
+		}
+		if !isJunkTrigger(s.effectWornOff) {
+			book.byWornOff[s.effectWornOff] = s
+		}
 	}
 
 	return book

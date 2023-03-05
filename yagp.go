@@ -6,6 +6,7 @@ import (
 	"github.com/hpcloud/tail"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -18,7 +19,7 @@ type timer struct {
 
 func (t timer) render() string {
 	remaining := t.duration - time.Since(t.startedAt)
-	return fmt.Sprintf("%s - %s", t.text, remaining.Round(time.Second))
+	return fmt.Sprintf("%s; %s", t.text, remaining.Round(time.Second))
 }
 
 type appState struct {
@@ -37,6 +38,7 @@ type screenOpts struct {
 
 var haddyLogFile = "/home/mtkoan/Games/everquest/drive_c/eq/Logs/eqlog_Haddy_project1999.txt"
 var hadgarLogFile = "/home/mtkoan/Games/everquest/drive_c/eq/Logs/eqlog_Hadgar_P1999Green.txt"
+var hypermagicLog = "/home/mtkoan/Games/everquest/drive_c/eq/Logs/eqlog_Hypermagic_P1999Green.txt"
 
 func (state *appState) tailLog(f string) error {
 	seekInfo := &tail.SeekInfo{Offset: 0, Whence: 2}
@@ -59,7 +61,7 @@ func (state *appState) tailLog(f string) error {
 }
 
 func (state *appState) handeLine(line *tail.Line) {
-	txt := line.Text[27:]
+	txt := strings.TrimSpace(line.Text[27:])
 	for _, t := range state.spellTriggers {
 		m := t.re.FindStringSubmatch(txt)
 		if len(m) > 0 {
@@ -86,6 +88,14 @@ func (state *appState) draw() {
 }
 
 func (state *appState) updateTimers() {
+	for i, t := range state.timers {
+		if time.Since(t.startedAt) > t.duration {
+			if t.onEnd != nil {
+				t.onEnd()
+			}
+			state.timers = append(state.timers[:i], state.timers[i+1:]...)
+		}
+	}
 }
 
 // drawLine draws a line of text on the screen but truncates it if it's too long.
@@ -166,7 +176,6 @@ type uiTick struct{}
 
 func main() {
 	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
-	boxStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorPurple)
 
 	// Initialize ui
 	s, err := tcell.NewScreen()
@@ -215,7 +224,7 @@ func main() {
 	}
 
 	go func() {
-		err := state.tailLog(hadgarLogFile)
+		err := state.tailLog(hypermagicLog)
 		if err != nil {
 			log.Fatalf("%+v", err)
 		}
@@ -233,7 +242,7 @@ func main() {
 	}()
 
 	// Event loop
-	ox, oy := -1, -1
+	oy := -1
 	for {
 		// Update ui
 		s.Show()
@@ -259,19 +268,20 @@ func main() {
 				s.Clear()
 			}
 		case *tcell.EventMouse:
-			x, y := ev.Position()
+			_, y := ev.Position()
 
 			switch ev.Buttons() {
-			case tcell.Button1, tcell.Button2:
-				if ox < 0 {
-					ox, oy = x, y // record location when click started
+			case tcell.Button2:
+				if oy < 0 {
+					oy = y // record location when click started
 				}
 
 			case tcell.ButtonNone:
-				if ox >= 0 {
-					label := fmt.Sprintf("%d,%d to %d,%d", ox, oy, x, y)
-					drawBox(s, ox, oy, x, y, boxStyle, label)
-					ox, oy = -1, -1
+				if oy >= 0 {
+					if oy < len(state.timers) {
+						state.timers = append(state.timers[:oy], state.timers[oy+1:]...)
+					}
+					oy = -1
 				}
 			}
 		}
