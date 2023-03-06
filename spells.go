@@ -50,15 +50,20 @@ func (sb spellBook) makeSpellTriggers() []spellTrigger {
 	for _, s := range sb.byOtherEffect {
 		t := newTrigger(fmt.Sprintf(`(.*)(%s)$`, s.effectOther),
 			func(s *appState, m []string) bool {
+				if len(m) < 3 {
+					return false
+				}
+
 				target := m[1]
 				sp, ok := s.spellBook.byOtherEffect[m[2]]
 				if !ok {
 					return false
 				}
 
-				theSpell := *s.casting
+				var theSpell spell
 				// e.g. Lull, Soothe, Calm, etc. have identical effectOther
-				if s.casting != nil && theSpell.effectOther == sp.effectOther {
+				if s.casting != nil && s.casting.effectOther == sp.effectOther {
+					theSpell = *s.casting
 					s.casting = nil
 				} else {
 					return false
@@ -68,10 +73,10 @@ func (sb spellBook) makeSpellTriggers() []spellTrigger {
 					return true
 				}
 
-				s.timers = append(s.timers, timer{
+				s.addTimer(timer{
 					startedAt: time.Now(),
 					duration:  spellDuration(theSpell, CharacterLevel),
-					text:      fmt.Sprintf("%s; %s", target, theSpell.name),
+					text:      fmt.Sprintf("%s; %s", theSpell.name, target),
 				})
 
 				return true
@@ -88,9 +93,10 @@ func (sb spellBook) makeSpellTriggers() []spellTrigger {
 					return false
 				}
 
-				theSpell := *s.casting
+				var theSpell spell
 				// for example, Yaulp I-IV have identical effectYou
-				if s.casting != nil && theSpell.effectYou == sp.effectYou {
+				if s.casting != nil && s.casting.effectYou == sp.effectYou {
+					theSpell = *s.casting
 					s.casting = nil
 				} else {
 					return false
@@ -100,10 +106,11 @@ func (sb spellBook) makeSpellTriggers() []spellTrigger {
 					return true
 				}
 
-				s.timers = append(s.timers, timer{
+				s.addTimer(timer{
 					startedAt: time.Now(),
 					duration:  spellDuration(theSpell, CharacterLevel),
 					text:      fmt.Sprintf("%s", theSpell.name),
+					self:      true,
 				})
 
 				return true

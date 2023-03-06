@@ -6,6 +6,7 @@ import (
 	"github.com/hpcloud/tail"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -14,12 +15,23 @@ type timer struct {
 	startedAt time.Time
 	duration  time.Duration
 	text      string
+	self      bool
 	onEnd     func()
 }
 
 func (t timer) render() string {
 	remaining := t.duration - time.Since(t.startedAt)
 	return fmt.Sprintf("%s; %s", t.text, remaining.Round(time.Second))
+}
+
+func (state *appState) addTimer(t timer) {
+	state.timers = append(state.timers, t)
+	sort.Slice(state.timers, func(i, j int) bool {
+		if state.timers[i].self && !state.timers[j].self {
+			return true
+		}
+		return state.timers[i].text < state.timers[j].text
+	})
 }
 
 type appState struct {
@@ -75,10 +87,12 @@ func (state *appState) handeLine(line *tail.Line) {
 
 func (state *appState) draw() {
 	y := 0
+
 	for _, t := range state.timers {
 		state.ui.drawLine(tcell.StyleDefault, t.render(), y)
 		y++
 	}
+
 	rem := state.ui.height - y
 	if rem > 0 {
 		for i := 0; i < rem; i++ {
@@ -118,58 +132,6 @@ func (so screenOpts) drawLine(style tcell.Style, text string, row int) {
 			so.screen.SetContent(x+i, row, ' ', nil, style)
 		}
 	}
-}
-
-func drawText(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string) {
-	row := y1
-	col := x1
-	for _, r := range []rune(text) {
-		s.SetContent(col, row, r, nil, style)
-		col++
-		if col >= x2 {
-			row++
-			col = x1
-		}
-		if row > y2 {
-			break
-		}
-	}
-}
-
-func drawBox(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string) {
-	if y2 < y1 {
-		y1, y2 = y2, y1
-	}
-	if x2 < x1 {
-		x1, x2 = x2, x1
-	}
-
-	// Fill background
-	for row := y1; row <= y2; row++ {
-		for col := x1; col <= x2; col++ {
-			s.SetContent(col, row, ' ', nil, style)
-		}
-	}
-
-	// Draw borders
-	for col := x1; col <= x2; col++ {
-		s.SetContent(col, y1, tcell.RuneHLine, nil, style)
-		s.SetContent(col, y2, tcell.RuneHLine, nil, style)
-	}
-	for row := y1 + 1; row < y2; row++ {
-		s.SetContent(x1, row, tcell.RuneVLine, nil, style)
-		s.SetContent(x2, row, tcell.RuneVLine, nil, style)
-	}
-
-	// Only draw corners if necessary
-	if y1 != y2 && x1 != x2 {
-		s.SetContent(x1, y1, tcell.RuneULCorner, nil, style)
-		s.SetContent(x2, y1, tcell.RuneURCorner, nil, style)
-		s.SetContent(x1, y2, tcell.RuneLLCorner, nil, style)
-		s.SetContent(x2, y2, tcell.RuneLRCorner, nil, style)
-	}
-
-	drawText(s, x1+1, y1+1, x2-1, y2-1, style, text)
 }
 
 type uiTick struct{}
